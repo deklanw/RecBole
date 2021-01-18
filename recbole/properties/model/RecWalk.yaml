@@ -1,0 +1,3 @@
+alpha: 0.005
+similarity_model: 'cos'
+k: 15
