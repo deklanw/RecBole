@@ -2,6 +2,7 @@ from recbole.model.general_recommender.bpr import BPR
 from recbole.model.general_recommender.convncf import ConvNCF
 from recbole.model.general_recommender.dgcf import DGCF
 from recbole.model.general_recommender.dmf import DMF
+from recbole.model.general_recommender.eigenrec import EigenRec
 from recbole.model.general_recommender.fism import FISM
 from recbole.model.general_recommender.gcmc import GCMC
 from recbole.model.general_recommender.itemknn import ItemKNN

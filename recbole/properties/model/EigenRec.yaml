@@ -1,0 +1,3 @@
+similarity: 'cosine'
+scaling_factor: 0.5
+k: 50

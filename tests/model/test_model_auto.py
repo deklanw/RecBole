@@ -175,6 +175,12 @@ class TestGeneralRecommender(unittest.TestCase):
         }
         quick_test(config_dict)
 
+    def test_EigenRec(self):
+        config_dict = {
+            'model': 'EigenRec',
+        }
+        quick_test(config_dict)
+
 class TestContextRecommender(unittest.TestCase):
     # todo: more complex context information should be test, such as criteo dataset
 
