@@ -1,0 +1,6 @@
+embedding_size: 63
+reg_weight: 0.00001
+iterations: 300
+verify_negative: True
+learning_rate: 0.001
+epochs: 1

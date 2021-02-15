@@ -1,0 +1,4 @@
+embedding_size: 32
+reg_weight: 0.005
+iterations: 50
+epochs: 1

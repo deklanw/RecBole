@@ -1,0 +1,6 @@
+embedding_size: 32
+reg_weight: 4
+iterations: 400
+learning_rate: 0.4
+neg_prop: 15
+epochs: 1
