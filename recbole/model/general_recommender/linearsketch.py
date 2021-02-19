@@ -6,7 +6,7 @@ from recbole.utils.enum_type import ModelType
 import numpy as np
 import scipy.sparse as sp
 import torch
-import warnings
+import scipy
 from sklearn.linear_model import Ridge
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.preprocessing import normalize
@@ -124,10 +124,12 @@ class LinearSketch(GeneralRecommender):
         self.dummy_param = torch.nn.Parameter(torch.zeros(1))
 
         d = config['embedding_size']
-        alpha = config['alpha']
-        embedding_type = config['embedding_type']
-        depth = config['depth']
+        self.depth = config['depth']
         num_hashes = config['num_hashes']
+        embedding_type = config['embedding_type']
+        prior_weight = config['prior_weight']
+
+        num_buckets = 2**num_hashes
 
         X = dataset.inter_matrix(
             form='csr').astype(np.float32)
@@ -143,30 +145,15 @@ class LinearSketch(GeneralRecommender):
 
         item_embeddings = embeddings[num_users:]
 
-        item_sketches = emde(item_embeddings, depth, num_hashes, d)
-        self.user_sketches = (X @ item_sketches) / (X.sum(axis=1) + 1e-7)
+        item_sketches = emde(item_embeddings, self.depth, num_hashes, d)
 
-        model = Ridge(alpha=alpha)
+        user_prefs = X @ (item_sketches + prior_weight)
 
-        coeffs = []
+        # normalize each of the [depth] number of probability distributions
+        user_prefs /= user_prefs[:, :num_buckets].sum(axis=1).reshape(-1, 1)
 
-        # ignore ConvergenceWarnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=ConvergenceWarning)
-
-            for j in range(X.shape[1]):
-                # target column
-                r = X[:, j].todense().getA1()
-
-                # fit the model
-                model.fit(self.user_sketches, r)
-
-                # store the coefficients
-                cs = model.coef_
-
-                coeffs.append(cs)
-
-        self.coefficients = np.vstack(coeffs).T
+        self.user_prefs = user_prefs
+        self.nonzero_item_sketch_columns = item_sketches.nonzero()[1]
 
     def forward(self):
         pass
@@ -174,14 +161,33 @@ class LinearSketch(GeneralRecommender):
     def calculate_loss(self, interaction):
         return torch.nn.Parameter(torch.zeros(1))
 
+    def get_all_user_predictions(self, user):
+        # little tricky here
+        # for each item:
+        # get the probability for the user according to each of the self.depth probability distributions
+        user_all_items_full_depth = self.user_prefs[user][self.nonzero_item_sketch_columns].reshape(
+            -1, self.depth)
+
+        # then take the geometric mean
+        return scipy.stats.mstats.gmean(user_all_items_full_depth, axis=1)
+
     def predict(self, interaction):
         user = interaction[self.USER_ID].cpu().numpy()
         item = interaction[self.ITEM_ID].cpu().numpy()
 
-        return torch.from_numpy((self.user_sketches[user, :] * self.coefficients[:, item].T).sum(axis=1).flatten())
+        predictions = []
+        for u, i in zip(user, item):
+            a = self.get_all_user_predictions(u)[i]
+            predictions.append(a)
+
+        return torch.from_numpy(np.array(predictions))
 
     def full_sort_predict(self, interaction):
         user = interaction[self.USER_ID].cpu().numpy()
 
-        r = self.user_sketches[user, :] @ self.coefficients
-        return torch.from_numpy(r.flatten())
+        predictions = []
+        for u in user:
+            ps = self.get_all_user_predictions(u)
+            predictions.append(ps)
+
+        return torch.from_numpy(np.concatenate(predictions))
