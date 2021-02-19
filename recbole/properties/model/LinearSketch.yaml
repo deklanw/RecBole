@@ -1,0 +1,5 @@
+alpha: 0.1
+embedding_size: 128
+embedding_type: 'simple'
+depth: 8
+num_hashes: 4
