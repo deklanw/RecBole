@@ -61,7 +61,7 @@ def local_slim_similarity(M, alpha, l1_ratio, C):
     np.fill_diagonal(S, 0)
 
     # find top C NN for each item
-    top_C_neighbors = np.argsort(S)[:, :C]
+    top_C_neighbors = np.argsort(S)[:, -C:]
 
     def fit_elastic(X, y):
         # if no neighbors. edge case where item has no interactions
@@ -138,21 +138,12 @@ class RecWalk(GeneralRecommender):
         l1_ratio = config['l1_ratio']
         cross_probability = config['cross_probability']
         C = int(config['C'])
-        k = int(config['k'])
+        self.k = int(config['k'])
         self.damping_factor = config['damping_factor']
         self.mode = config['mode']
         self.tol = 1e-6
 
         self.P = compute_P(B, alpha, l1_ratio, C, cross_probability)
-
-        if self.mode == 'kstep':
-            # precompute this for predictions
-            # could consider saving memory by avoiding this
-            self.walk = self.P.todense() ** k
-        elif self.mode == 'pagerank':
-            pass
-        else:
-            raise ValueError("Mode should be 'kstep' or 'pagerank'")
 
     def forward(self):
         pass
@@ -175,9 +166,13 @@ class RecWalk(GeneralRecommender):
         num_users, _ = self.shape
 
         walk_indicators = self.get_walk_indicator(users)
+        current_scores = walk_indicators.copy().todense()
+
+        for _ in range(self.k):
+            current_scores = current_scores @ self.P
 
         # make all item predictions for specified users
-        user_all_items = (walk_indicators @ self.walk)[:, num_users:]
+        user_all_items = current_scores[:, num_users:]
 
         return user_all_items
 
