@@ -157,7 +157,8 @@ class RecWalk(GeneralRecommender):
 
         if self.mode == 'kstep':
             # precompute this for predictions
-            self.walk = self.P ** k
+            # could consider saving memory by avoiding this
+            self.walk = self.P.todense() ** k
         elif self.mode == 'pagerank':
             pass
         else:
