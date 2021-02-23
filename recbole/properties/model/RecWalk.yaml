@@ -1,3 +1,8 @@
-alpha: 0.005
-similarity_model: 'cos'
-k: 15
+alpha: 0.001
+l1_ratio: 0.001
+k: 10
+C: 150
+cross_probability: 0.03
+damping_factor: 0.1
+mode: 'kstep'
+epochs: 1
