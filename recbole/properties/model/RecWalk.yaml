@@ -5,4 +5,3 @@ C: 150
 cross_probability: 0.03
 damping_factor: 0.1
 mode: 'kstep'
-epochs: 1

@@ -51,30 +51,17 @@ def construct_M(M_I, shape):
     return A
 
 
-def top_n_idx_sparse(matrix, n):
-    # https://stackoverflow.com/questions/49207275/finding-the-top-n-values-in-a-row-of-a-scipy-sparse-matrix
-    '''Return index of (up to) top n values in each row of a sparse matrix'''
-    top_n_idx = []
-    for le, ri in zip(matrix.indptr[:-1], matrix.indptr[1:]):
-        n_row_pick = min(n, ri - le)
-        top_n_idx.append(
-            matrix.indices[le + np.argpartition(matrix.data[le:ri], -n_row_pick)[-n_row_pick:]])
-    return top_n_idx
-
-
 def local_slim_similarity(M, alpha, l1_ratio, C):
     _, num_items = M.shape
 
     # get item-item cosine similarity
-    S = cosine_similarity(M.T, dense_output=False).tolil()
+    S = cosine_similarity(M.T, dense_output=True)
 
     # remove self-similarity
-    S.setdiag(0)
-
-    S = S.tocsr()
+    np.fill_diagonal(S, 0)
 
     # find top C NN for each item
-    top_C_neighbors = top_n_idx_sparse(S, C)
+    top_C_neighbors = np.argsort(S)[:, :C]
 
     def fit_elastic(X, y):
         # if no neighbors. edge case where item has no interactions
@@ -95,12 +82,15 @@ def local_slim_similarity(M, alpha, l1_ratio, C):
 
         return model.coef_
 
+    # make column slicing more efficient
+    M = M.tocsc()
+
     # solve the SLIM problem for each item and its C neighbors, and store coefficients in appropriate column of W
     # ignore ConvergenceWarnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
 
-        coeffs = Parallel(n_jobs=-1)(delayed(fit_elastic)(M[:, top_C_neighbors[i]], M[:, i].todense().getA1())
+        coeffs = Parallel(n_jobs=-1)(delayed(fit_elastic)(M[:, top_C_neighbors[i]], M[:, i].A)
                                      for i in range(num_items))
 
     # empty item-item similarity matrix
@@ -182,7 +172,7 @@ class RecWalk(GeneralRecommender):
         return walk_indicators
 
     def get_user_predictions_k_step(self, users):
-        num_users, num_items = self.shape
+        num_users, _ = self.shape
 
         walk_indicators = self.get_walk_indicator(users)
 
