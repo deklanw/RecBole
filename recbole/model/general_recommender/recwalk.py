@@ -119,6 +119,20 @@ def compute_P(B, alpha, l1_ratio, C, cross_probability):
     return P
 
 
+def scipy_to_sparse_tensor(A):
+    # https://stackoverflow.com/a/50665264/7367514
+    C = A.tocoo()
+
+    values = C.data
+    indices = np.vstack((C.row, C.col))
+
+    i = torch.LongTensor(indices)
+    v = torch.FloatTensor(values)
+    shape = C.shape
+
+    return torch.sparse.FloatTensor(i, v, torch.Size(shape))
+
+
 class RecWalk(GeneralRecommender):
     input_type = InputType.POINTWISE
     type = ModelType.TRADITIONAL
@@ -143,7 +157,10 @@ class RecWalk(GeneralRecommender):
         self.mode = config['mode']
         self.tol = 1e-6
 
-        self.P = compute_P(B, alpha, l1_ratio, C, cross_probability)
+        P = compute_P(B, alpha, l1_ratio, C, cross_probability)
+
+        # store this transposed
+        self.P_t = scipy_to_sparse_tensor(P.T).to(self.device)
 
     def forward(self):
         pass
@@ -155,10 +172,9 @@ class RecWalk(GeneralRecommender):
         batch_size = len(users)
         num_users, num_items = self.shape
 
-        walk_indicators = sp.lil_matrix((batch_size, num_users + num_items))
+        walk_indicators = torch.zeros((batch_size, num_users + num_items)).to(self.device)
 
-        for i, user_id in enumerate(users):
-            walk_indicators[i, user_id] = 1
+        walk_indicators[range(len(users)), users] = 1
 
         return walk_indicators
 
@@ -166,44 +182,45 @@ class RecWalk(GeneralRecommender):
         num_users, _ = self.shape
 
         walk_indicators = self.get_walk_indicator(users)
-        current_scores = walk_indicators.copy().todense()
+        current_scores_t = walk_indicators.clone().transpose(0, 1)
 
         for _ in range(self.k):
-            current_scores = current_scores @ self.P
+            current_scores_t = torch.sparse.mm(self.P_t, current_scores_t)
 
         # make all item predictions for specified users
-        user_all_items = current_scores[:, num_users:]
+        user_all_items = current_scores_t.transpose(0, 1)[:, num_users:]
 
         return user_all_items
 
     def get_user_predictions_pagerank(self, users):
         num_users, _ = self.shape
 
-        walk_indicators = self.get_walk_indicator(users)
-        last = walk_indicators.copy().todense()
+        walk_indicators_t = self.get_walk_indicator(users).transpose(0, 1)
+        last = walk_indicators_t
 
         # PR power method until convergence
         while True:
-            current_scores = (self.damping_factor *
-                              (last @ self.P) + (1-self.damping_factor) * walk_indicators)
+            current_scores = (self.damping_factor * torch.sparse.mm(self.P_t, last)
+                              + (1-self.damping_factor) * walk_indicators_t)
 
-            current_scores = normalize(current_scores, norm='l2', axis=1)
+            current_scores = current_scores / \
+                torch.linalg.norm(current_scores, ord=2, dim=0)
 
-            residuals = np.linalg.norm(current_scores - last, ord=1, axis=1)
+            residuals = torch.linalg.norm(current_scores - last, ord=1, dim=0)
 
-            if np.all(residuals < self.tol):
+            if torch.all(residuals < self.tol):
                 break
 
             last = current_scores
 
         # make all item predictions for specified users
-        user_all_items = current_scores[:, num_users:]
+        user_all_items = current_scores.transpose(0, 1)[:, num_users:]
 
         return user_all_items
 
     def predict(self, interaction):
-        users = interaction[self.USER_ID].cpu().numpy()
-        items = interaction[self.ITEM_ID].cpu().numpy()
+        users = interaction[self.USER_ID]
+        items = interaction[self.ITEM_ID]
 
         if self.mode == 'kstep':
             user_all_items = self.get_user_predictions_k_step(users)
@@ -211,17 +228,16 @@ class RecWalk(GeneralRecommender):
             user_all_items = self.get_user_predictions_pagerank(users)
 
         # then narrow down to specific items
-        # without this copy(): "cannot set WRITEABLE flag..."
-        item_predictions = user_all_items[range(len(users)), items.copy()]
+        item_predictions = user_all_items[range(len(users)), items]
 
-        return torch.from_numpy(item_predictions.flatten())
+        return item_predictions.flatten()
 
     def full_sort_predict(self, interaction):
-        users = interaction[self.USER_ID].cpu().numpy()
+        users = interaction[self.USER_ID]
 
         if self.mode == 'kstep':
             user_all_items = self.get_user_predictions_k_step(users)
         else:
             user_all_items = self.get_user_predictions_pagerank(users)
 
-        return torch.from_numpy(user_all_items.flatten())
+        return user_all_items.flatten()
